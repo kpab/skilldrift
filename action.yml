@@ -1,0 +1,72 @@
+name: skilldrift
+description: >-
+  導入済みClaude Code Skillsの上流ドリフトを検知し、GitHub Issueで通知する。
+  リポジトリの skilldrift.lock(skilldrift initで生成)が比較の基準になる。
+author: kpab
+
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  dir:
+    description: skilldrift.lock のあるディレクトリ(リポジトリルートからの相対)
+    default: "."
+  create-issue:
+    description: ドリフト検知時にIssueを作成/更新するか
+    default: "true"
+  issue-repo:
+    description: Issueを立てるリポジトリ(owner/name)
+    default: ${{ github.repository }}
+  token:
+    description: GitHub APIトークン(上流の取得とIssue作成に使う。Issue作成には issues: write が必要)
+    default: ${{ github.token }}
+  fail-on-drift:
+    description: ドリフト検知時にステップを失敗させるか(Issue通知だけで足りるなら "false" のまま)
+    default: "false"
+
+outputs:
+  drifted:
+    description: ドリフトを検知したか("true" / "false")
+    value: ${{ steps.check.outputs.drifted }}
+
+runs:
+  using: composite
+  steps:
+    # releaseバイナリが出るまでの暫定として、actionのref時点のソースをビルドして使う
+    # (バイナリDL方式への切替はM3のgoreleaser導入時)
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+
+    - shell: bash
+      run: go build -C "$GITHUB_ACTION_PATH" -o "$RUNNER_TEMP/skilldrift" .
+
+    - id: check
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        INPUT_DIR: ${{ inputs.dir }}
+        INPUT_CREATE_ISSUE: ${{ inputs.create-issue }}
+        INPUT_ISSUE_REPO: ${{ inputs.issue-repo }}
+        INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+      run: |
+        args=(check -dir "$INPUT_DIR")
+        if [ "$INPUT_CREATE_ISSUE" = "true" ]; then
+          args+=(-issue -issue-repo "$INPUT_ISSUE_REPO")
+        fi
+
+        set +e
+        "$RUNNER_TEMP/skilldrift" "${args[@]}"
+        code=$?
+        set -e
+
+        case "$code" in
+          0) echo "drifted=false" >> "$GITHUB_OUTPUT" ;;
+          1) echo "drifted=true" >> "$GITHUB_OUTPUT"
+             if [ "$INPUT_FAIL_ON_DRIFT" = "true" ]; then
+               exit 1
+             fi ;;
+          *) exit "$code" ;;
+        esac

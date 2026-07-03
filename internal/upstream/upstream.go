@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,6 +31,9 @@ type Client struct {
 	HTTP    *http.Client
 	BaseURL string // テスト用に差し替え可能。既定は api.github.com
 	Token   string
+
+	mu    sync.Mutex
+	trees map[string]map[string][]byte // "repo@commit" -> 展開済みtarball(全ファイル)
 }
 
 // New は環境変数 GITHUB_TOKEN(なければ GH_TOKEN)を読んでクライアントを作る。
@@ -67,11 +72,13 @@ func (c *Client) ResolveCommit(ctx context.Context, repo, ref string) (string, e
 // FetchDir は repo の commit 時点における subdir(空ならリポジトリ全体)配下の
 // 全通常ファイルの内容を返す。キーは subdir からの相対パス(区切りは "/")で、
 // lockfileのFilesと直接比較できる形。
+// 同一repo×commitのtarballは1回だけ取得しキャッシュするため、
+// 同じ上流の複数スキルを順に調べても再ダウンロードは発生しない。
 func (c *Client) FetchDir(ctx context.Context, repo, commit, subdir string) (map[string][]byte, error) {
 	if err := validateRepo(repo); err != nil {
 		return nil, err
 	}
-	body, err := c.get(ctx, fmt.Sprintf("/repos/%s/tarball/%s", repo, url.PathEscape(commit)), "")
+	tree, err := c.fetchTree(ctx, repo, commit)
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +87,37 @@ func (c *Client) FetchDir(ctx context.Context, repo, commit, subdir string) (map
 	if prefix == "." || prefix == "/" {
 		prefix = ""
 	}
+	files := map[string][]byte{}
+	for p, data := range tree {
+		if prefix != "" {
+			if !strings.HasPrefix(p, prefix+"/") {
+				continue
+			}
+			p = strings.TrimPrefix(p, prefix+"/")
+		}
+		files[p] = data
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("%s@%s: %q にファイルが無い(source.subdirの記載を確認)", repo, shortSHA(commit), subdir)
+	}
+	return files, nil
+}
+
+// fetchTree は repo@commit のtarballを取得して全通常ファイルを展開し、キャッシュする。
+func (c *Client) fetchTree(ctx context.Context, repo, commit string) (map[string][]byte, error) {
+	key := repo + "@" + commit
+	c.mu.Lock()
+	tree, ok := c.trees[key]
+	c.mu.Unlock()
+	if ok {
+		return tree, nil
+	}
+
+	body, err := c.get(ctx, fmt.Sprintf("/repos/%s/tarball/%s", repo, url.PathEscape(commit)), "")
+	if err != nil {
+		return nil, err
+	}
+
 	gz, err := gzip.NewReader(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%s のtarballの展開に失敗: %w", repo, err)
@@ -104,21 +142,19 @@ func (c *Client) FetchDir(ctx context.Context, repo, commit, subdir string) (map
 		if !ok || rest == "" {
 			continue
 		}
-		if prefix != "" {
-			if !strings.HasPrefix(rest, prefix+"/") {
-				continue
-			}
-			rest = strings.TrimPrefix(rest, prefix+"/")
-		}
 		data, err := io.ReadAll(tr)
 		if err != nil {
 			return nil, fmt.Errorf("%s の %s の読み込みに失敗: %w", repo, hdr.Name, err)
 		}
 		files[rest] = data
 	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("%s@%s: %q にファイルが無い(source.subdirの記載を確認)", repo, shortSHA(commit), subdir)
+
+	c.mu.Lock()
+	if c.trees == nil {
+		c.trees = map[string]map[string][]byte{}
 	}
+	c.trees[key] = files
+	c.mu.Unlock()
 	return files, nil
 }
 
@@ -130,6 +166,24 @@ func (c *Client) get(ctx context.Context, apiPath, accept string) ([]byte, error
 	if accept != "" {
 		req.Header.Set("Accept", accept)
 	}
+	return c.do(req)
+}
+
+// send はJSONボディ付きのリクエスト(POST/PATCH)を送る。
+func (c *Client) send(ctx context.Context, method, apiPath string, payload any) ([]byte, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub APIリクエストのシリアライズに失敗: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.BaseURL+apiPath, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req)
+}
+
+func (c *Client) do(req *http.Request) ([]byte, error) {
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -145,13 +199,14 @@ func (c *Client) get(ctx context.Context, apiPath, accept string) ([]byte, error
 		return nil, fmt.Errorf("GitHub API応答の読み込みに失敗: %w", err)
 	}
 
+	apiPath := req.URL.Path
 	switch resp.StatusCode {
-	case http.StatusOK:
+	case http.StatusOK, http.StatusCreated:
 		return body, nil
 	case http.StatusNotFound:
 		return nil, fmt.Errorf("GitHub: %s が見つからない(repo/ref/commitの記載、privateリポジトリならGITHUB_TOKENを確認)", apiPath)
 	case http.StatusForbidden, http.StatusTooManyRequests:
-		return nil, fmt.Errorf("GitHub: %s へのアクセスが拒否された(rate limitの可能性。GITHUB_TOKENの設定で緩和できる): HTTP %d", apiPath, resp.StatusCode)
+		return nil, fmt.Errorf("GitHub: %s へのアクセスが拒否された(rate limitか権限不足。書き込みには issues: write 権限のトークンが必要): HTTP %d", apiPath, resp.StatusCode)
 	default:
 		return nil, fmt.Errorf("GitHub: %s が HTTP %d を返した: %s", apiPath, resp.StatusCode, truncate(string(body), 200))
 	}

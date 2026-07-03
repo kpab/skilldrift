@@ -1,0 +1,188 @@
+// Package report はドリフト検知結果をGitHub Issueとして報告する。
+//
+// 重複防止はIssue本文先頭の機械可読マーカーで行う:
+//
+//	<!-- skilldrift:skill=<name> fingerprint=<hash> -->
+//
+// Publish はopenなIssueを走査してマーカーを読み、
+//   - 同一スキル・同一fingerprint → 何もしない(既報)
+//   - 同一スキル・異なるfingerprint → 本文を更新し、コメントで通知
+//   - 該当Issueなし → 新規作成
+//
+// とすることで、同じドリフトについてスキルあたり高々1つのopen Issueを保つ。
+// fingerprintは上流の新commitと変更ファイル一覧から決まるため、
+// 上流がさらに進めば同じIssueが更新され、closeすれば再検知時に新規作成される。
+package report
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/kpab/skilldrift/internal/lockfile"
+	"github.com/kpab/skilldrift/internal/upstream"
+)
+
+// Label は自動生成Issueに付けるラベル。
+const Label = "skilldrift"
+
+// Drift は1スキル分のドリフト検知結果。checkが組み立てPublishが報告する。
+type Drift struct {
+	Skill     string
+	Repo      string // 上流 "owner/name"
+	Subdir    string
+	OldCommit string // lockfileに記録されていたcommit(未記入なら空)
+	NewCommit string
+	Changes   []lockfile.FileChange
+}
+
+// Fingerprint はドリフト内容の同一性判定に使うハッシュ(16桁hex)。
+// 上流の新commitと変更ファイル一覧が同じなら同じ値になる。
+func Fingerprint(d Drift) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\n%s\n%s\n%s\n", d.Skill, d.Repo, d.Subdir, d.NewCommit)
+	for _, c := range d.Changes {
+		fmt.Fprintf(h, "%s %s\n", c.Kind, c.Path)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+// Title はIssueのタイトル。
+func Title(d Drift) string {
+	return fmt.Sprintf("skilldrift: スキル %s の上流に変更を検知", d.Skill)
+}
+
+// marker はIssue本文に埋め込む機械可読マーカー。
+func marker(d Drift) string {
+	return fmt.Sprintf("<!-- skilldrift:skill=%s fingerprint=%s -->", d.Skill, Fingerprint(d))
+}
+
+var markerRe = regexp.MustCompile(`<!-- skilldrift:skill=(\S+) fingerprint=([0-9a-f]+) -->`)
+
+// parseMarker はIssue本文からマーカーを読む。skilldrift製でなければ ok=false。
+func parseMarker(body string) (skill, fingerprint string, ok bool) {
+	m := markerRe.FindStringSubmatch(body)
+	if m == nil {
+		return "", "", false
+	}
+	return m[1], m[2], true
+}
+
+// Body はIssue本文を組み立てる。
+func Body(d Drift) string {
+	var b strings.Builder
+	b.WriteString(marker(d))
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "スキル `%s` の上流に変更を検知した。取り込む前に、悪意ある変更(プロンプトインジェクション、不審なスクリプトやURLの追加など)が無いか内容を確認すること。\n\n", d.Skill)
+
+	fmt.Fprintf(&b, "- 上流: [`%s`](https://github.com/%s)", d.Repo, d.Repo)
+	if d.Subdir != "" {
+		fmt.Fprintf(&b, " の `%s`", d.Subdir)
+	}
+	b.WriteString("\n")
+	if d.OldCommit != "" {
+		fmt.Fprintf(&b, "- commit: `%s` → `%s`([diffを見る](https://github.com/%s/compare/%s...%s))\n",
+			short(d.OldCommit), short(d.NewCommit), d.Repo, d.OldCommit, d.NewCommit)
+	} else {
+		fmt.Fprintf(&b, "- commit: (lockfileに未記録)→ `%s`\n", short(d.NewCommit))
+	}
+
+	b.WriteString("\n### 変更ファイル\n\n")
+	for _, c := range d.Changes {
+		fmt.Fprintf(&b, "- %s: `%s`\n", changeLabel(c.Kind), c.Path)
+	}
+
+	b.WriteString("\n### 対応\n\n")
+	b.WriteString("問題ない変更なら、ローカルのスキルを上流に合わせて更新し `skilldrift init` を再実行するとlockfileが現状で更新され、このIssueの根拠は解消する。\n")
+	b.WriteString("\n---\n*このIssueは [skilldrift](https://github.com/kpab/skilldrift) が自動生成した。同じスキルの上流がさらに変わると本文を更新する。*\n")
+	return b.String()
+}
+
+func changeLabel(k lockfile.ChangeKind) string {
+	switch k {
+	case lockfile.ChangeAdded:
+		return "追加"
+	case lockfile.ChangeRemoved:
+		return "削除"
+	default:
+		return "変更"
+	}
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+// API は Publish が必要とするGitHub Issue操作。*upstream.Client が満たす。
+type API interface {
+	ListOpenIssues(ctx context.Context, repo string) ([]upstream.Issue, error)
+	CreateIssue(ctx context.Context, repo, title, body string, labels []string) (upstream.Issue, error)
+	UpdateIssue(ctx context.Context, repo string, number int, title, body string) error
+	CommentIssue(ctx context.Context, repo string, number int, body string) error
+}
+
+// Action はPublishが各ドリフトに対して取った操作。
+type Action string
+
+const (
+	ActionCreated Action = "created" // 新規Issueを作成した
+	ActionUpdated Action = "updated" // 既存Issueを新しいドリフト内容で更新した
+	ActionSkipped Action = "skipped" // 同一内容のopen Issueが既にある(既報)
+)
+
+// Published は1ドリフト分の報告結果。
+type Published struct {
+	Skill  string
+	Number int // Issue番号
+	Action Action
+}
+
+// Publish は drifts を repo のIssueとして報告する。途中で失敗した場合、
+// そこまでの結果とエラーを返す(部分的に作成済みのIssueはそのまま残る)。
+func Publish(ctx context.Context, api API, repo string, drifts []Drift) ([]Published, error) {
+	open, err := api.ListOpenIssues(ctx, repo)
+	if err != nil {
+		return nil, fmt.Errorf("既存Issueの取得に失敗: %w", err)
+	}
+	type existing struct {
+		number      int
+		fingerprint string
+	}
+	bySkill := map[string]existing{}
+	for _, is := range open {
+		if skill, fp, ok := parseMarker(is.Body); ok {
+			bySkill[skill] = existing{number: is.Number, fingerprint: fp}
+		}
+	}
+
+	var results []Published
+	for _, d := range drifts {
+		ex, found := bySkill[d.Skill]
+		switch {
+		case found && ex.fingerprint == Fingerprint(d):
+			results = append(results, Published{Skill: d.Skill, Number: ex.number, Action: ActionSkipped})
+		case found:
+			if err := api.UpdateIssue(ctx, repo, ex.number, Title(d), Body(d)); err != nil {
+				return results, fmt.Errorf("Issue #%d の更新に失敗: %w", ex.number, err)
+			}
+			comment := fmt.Sprintf("上流がさらに更新された(現在のcommit: `%s`)。本文を最新のドリフト内容に更新した。", short(d.NewCommit))
+			if err := api.CommentIssue(ctx, repo, ex.number, comment); err != nil {
+				return results, fmt.Errorf("Issue #%d へのコメントに失敗: %w", ex.number, err)
+			}
+			results = append(results, Published{Skill: d.Skill, Number: ex.number, Action: ActionUpdated})
+		default:
+			is, err := api.CreateIssue(ctx, repo, Title(d), Body(d), []string{Label})
+			if err != nil {
+				return results, fmt.Errorf("スキル %s のIssue作成に失敗: %w", d.Skill, err)
+			}
+			results = append(results, Published{Skill: d.Skill, Number: is.Number, Action: ActionCreated})
+		}
+	}
+	return results, nil
+}

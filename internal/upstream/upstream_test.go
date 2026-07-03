@@ -170,6 +170,28 @@ func TestFetchDirWholeRepo(t *testing.T) {
 	}
 }
 
+func TestFetchDirCachesTarballPerCommit(t *testing.T) {
+	tarball := makeTarball(t, "owner-repo-abc123", map[string]string{
+		"skills/alpha/SKILL.md": "# alpha",
+		"skills/beta/SKILL.md":  "# beta",
+	})
+	var requests int
+	c, done := testClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Write(tarball)
+	}))
+	defer done()
+
+	for _, subdir := range []string{"skills/alpha", "skills/beta"} {
+		if _, err := c.FetchDir(context.Background(), "owner/repo", "abc123", subdir); err != nil {
+			t.Fatalf("FetchDir(%s): %v", subdir, err)
+		}
+	}
+	if requests != 1 {
+		t.Errorf("同一repo×commitのtarballは1回だけ取得するはずが %d回", requests)
+	}
+}
+
 func TestFetchDirSubdirMissing(t *testing.T) {
 	tarball := makeTarball(t, "owner-repo-abc123", map[string]string{"README.md": "x"})
 	c, done := testClient(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

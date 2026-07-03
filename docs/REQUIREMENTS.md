@@ -58,6 +58,10 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
     (kpab/claude-fable-5-skills のクローンで cbb4851 を指定 → effort-calibrator の SKILL.md 変更を検知、
     他9スキルは「commit進行のみ・内容同一」と正しく判定。git diff --stat と完全一致)
 - **M2(CI統合)**: composite action化 + Issue自動生成。自分のskillsリポジトリにschedule実行で導入し、実際にIssueが立つところまで
+  - [x] `check -issue`: ドリフトをGitHub Issueとして報告(internal/report)。重複防止つき
+  - [x] tarball取得のキャッシュ(同一repo×commitは1回だけ取得)
+  - [x] composite action(action.yml)。当面はactionのref時点のソースをgo buildする方式
+  - [ ] ドッグフーディング: kpab/claude-fable-5-skills にschedule導入し、実Issueが立つのを確認
 - **M3(リスク評価)**: SkillSpectorラップによる新旧スコア比較をIssue本文に組み込む。goreleaserでv0.1.0公開
 
 ## 将来(今は設計だけ意識)
@@ -72,12 +76,21 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
 - **変更検知の粒度はハイブリッド**(M1で確定): 最終判定はファイル単位のコンテンツハッシュ(sha256)。commit単位だと上流のスキル外変更で誤検知し、force-push等でcommitが動かないすり替えも見逃すため。commitは`check`の短絡判定(一致なら取得省略)とdrift時のdiff起点として併記する。SKILL.md以外の同梱ファイル(スクリプト等)もスキルディレクトリ配下を再帰的に全て対象とする。スキーマの詳細は `internal/lockfile` のパッケージコメント参照
 
 - **checkの終了コードは 0=ドリフトなし / 1=ドリフト検知 / 2=エラー**(M1で確定): grep等の慣例に合わせ、CIで「ドリフト」と「実行失敗」を区別できるようにする
+- **Issueの重複防止はマーカー方式**(M2で確定): Issue本文先頭に機械可読マーカー
+  `<!-- skilldrift:skill=<name> fingerprint=<hash> -->` を埋め、実行時にopen Issueを走査して
+  同一スキル・同一fingerprint(新commit+変更ファイル一覧のハッシュ)なら何もしない。
+  fingerprintが変わっていたら本文を更新しコメントで通知する(スキルあたりopen Issueは高々1つ)。
+  ラベルでの検索に依存しないのは、ラベル未作成のリポジトリでも壊れないようにするため
+  (`skilldrift` ラベルは人間向けのフィルタとして付与はする)
+
+- **composite actionは当面go build方式**(M2で確定): まだreleaseが無いため、
+  actionのref時点のソースを `actions/setup-go` + `go build` で使う(実行時に自然にrefへピン留めされる)。
+  releaseバイナリDL方式への切替はM3のgoreleaser導入とセットで行う
+
 - **上流取得はGitHub API直叩き**(M1で確定): gh CLIに依存すると利用者の導入前提が増えるため、標準ライブラリのみでREST APIを叩く。認証は`GITHUB_TOKEN`/`GH_TOKEN`(任意)。ファイル内容はtarball APIでリポジトリ×commitあたり1リクエストにまとめ、匿名rate limit(60回/時)でも実用にする
 
 ## 未定事項
 
 - CLIフレームワーク(cobra vs stdlib)— M1実装時に決定
 - SkillSpectorのCI上での導入方法(pip / uvx / バイナリ)— M3で調査
-- Issueの重複防止(同じdriftで毎回立てない仕組み)— M2で設計
-- tarball取得のキャッシュ(現状は同一repo×commitでもスキルごとに再取得。スキル数が多いと無駄)— M2で改善
-- Action名・marketplace公開するか — M2以降
+- Action名・marketplace公開するか — M3以降

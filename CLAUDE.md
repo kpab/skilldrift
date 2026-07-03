@@ -17,8 +17,9 @@ lockfileで出自を追跡し、ドリフト検知→リスク再評価→Issue�
 - `docs/` — IDEA.md(経緯)、REQUIREMENTS.md(要件・マイルストーン)
 - `internal/lockfile/` — lockfileスキーマ・読み書き・コンテンツハッシュ・Reconcile(走査結果の反映)
 - `internal/scan/` — スキルディレクトリの発見(SKILL.mdを含むディレクトリ)とハッシュ収集
-- `internal/upstream/` — GitHub APIクライアント(commit解決・tarballでのファイル取得)
-- ロジックが育ったら `internal/` に切り出す(diff検知)
+- `internal/upstream/` — GitHub APIクライアント(commit解決・tarballでのファイル取得+キャッシュ・Issue操作)
+- `internal/report/` — ドリフトのIssue報告(本文生成・fingerprintによる重複防止)
+- `action.yml` — composite action(当面はactionのソースをgo buildして実行)
 
 ## コマンド
 

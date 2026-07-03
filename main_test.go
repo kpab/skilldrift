@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,6 +179,82 @@ func TestRunCheckCommitAdvancedContentSame(t *testing.T) {
 	}
 	if drifted {
 		t.Error("内容同一(commitのみ進行)でドリフト判定された")
+	}
+}
+
+// TestRunCheckIssueFlow はドリフト検知→Issue作成→再実行で既報スキップ、の一連を通す。
+func TestRunCheckIssueFlow(t *testing.T) {
+	newSHA := strings.Repeat("b", 40)
+	dir := checkFixture(t, strings.Repeat("a", 40), map[string]string{
+		"SKILL.md": lockfile.HashBytes([]byte("元の内容")),
+	})
+
+	var issues []map[string]any
+	var creates, comments int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/commits/"):
+			w.Write([]byte(newSHA))
+		case strings.Contains(r.URL.Path, "/tarball/"):
+			var buf bytes.Buffer
+			gz := gzip.NewWriter(&buf)
+			tw := tar.NewWriter(gz)
+			content := "改ざん後の内容"
+			tw.WriteHeader(&tar.Header{
+				Name: "owner-repo-bbbbbbb/skills/alpha/SKILL.md",
+				Mode: 0o644, Size: int64(len(content)), Typeflag: tar.TypeReg,
+			})
+			tw.Write([]byte(content))
+			tw.Close()
+			gz.Close()
+			w.Write(buf.Bytes())
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues"):
+			json.NewEncoder(w).Encode(issues)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/issues"):
+			creates++
+			var payload map[string]any
+			json.NewDecoder(r.Body).Decode(&payload)
+			payload["number"] = float64(creates)
+			issues = append(issues, payload)
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(payload)
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/comments"):
+			comments++
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":1}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	args := []string{"-dir", dir, "-issue", "-issue-repo", "me/skills"}
+
+	c1 := &upstream.Client{HTTP: &http.Client{Timeout: 5 * time.Second}, BaseURL: srv.URL}
+	drifted, err := runCheckWith(c1, args)
+	if err != nil || !drifted {
+		t.Fatalf("1回目: drifted=%v err=%v", drifted, err)
+	}
+	if creates != 1 {
+		t.Fatalf("1回目でIssueが1件作成されるはずが %d件", creates)
+	}
+
+	// 2回目: 同一ドリフトなので新規作成もコメントも発生しない
+	c2 := &upstream.Client{HTTP: &http.Client{Timeout: 5 * time.Second}, BaseURL: srv.URL}
+	drifted, err = runCheckWith(c2, args)
+	if err != nil || !drifted {
+		t.Fatalf("2回目: drifted=%v err=%v", drifted, err)
+	}
+	if creates != 1 || comments != 0 {
+		t.Errorf("2回目は既報スキップのはずが creates=%d comments=%d", creates, comments)
+	}
+}
+
+func TestRunCheckIssueRequiresRepo(t *testing.T) {
+	t.Setenv("GITHUB_REPOSITORY", "")
+	_, err := runCheckWith(&upstream.Client{}, []string{"-dir", t.TempDir(), "-issue"})
+	if err == nil || !strings.Contains(err.Error(), "issue-repo") {
+		t.Errorf("issue-repo必須のエラーを期待したが: %v", err)
 	}
 }
 

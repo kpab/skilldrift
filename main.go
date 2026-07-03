@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/kpab/skilldrift/internal/lockfile"
+	"github.com/kpab/skilldrift/internal/report"
 	"github.com/kpab/skilldrift/internal/scan"
 	"github.com/kpab/skilldrift/internal/upstream"
 )
@@ -124,8 +125,13 @@ func runCheck(args []string) (bool, error) {
 func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 	fset := flag.NewFlagSet("check", flag.ContinueOnError)
 	dir := fset.String("dir", ".", "lockfileのあるリポジトリルート")
+	issue := fset.Bool("issue", false, "ドリフト検知時にGitHub Issueを作成/更新する(要 GITHUB_TOKEN)")
+	issueRepo := fset.String("issue-repo", os.Getenv("GITHUB_REPOSITORY"), "Issueを立てるリポジトリ(owner/name。既定は $GITHUB_REPOSITORY)")
 	if err := fset.Parse(args); err != nil {
 		return false, err
+	}
+	if *issue && *issueRepo == "" {
+		return false, fmt.Errorf("check: -issue には -issue-repo(または環境変数 GITHUB_REPOSITORY)が必要")
 	}
 
 	lockPath := filepath.Join(*dir, lockfile.DefaultPath)
@@ -139,7 +145,8 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 
 	ctx := context.Background()
 	resolved := map[string]string{} // "repo@ref" -> commit SHA(同一上流への問い合わせは1回)
-	var driftCount, untracked, failures int
+	var drifts []report.Drift
+	var untracked, failures int
 	for _, s := range lf.Skills {
 		if !s.Tracked() {
 			untracked++
@@ -179,7 +186,14 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 			continue
 		}
 
-		driftCount++
+		drifts = append(drifts, report.Drift{
+			Skill:     s.Name,
+			Repo:      s.Source.Repo,
+			Subdir:    s.Source.Subdir,
+			OldCommit: s.Source.Commit,
+			NewCommit: sha,
+			Changes:   changes,
+		})
 		fmt.Printf("\nドリフト: %s(%s", s.Name, s.Source.Repo)
 		if s.Source.Subdir != "" {
 			fmt.Printf(" の %s", s.Source.Subdir)
@@ -195,15 +209,37 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 	if untracked > 0 {
 		fmt.Printf("出自未記入のためスキップ: %d件(%s の source.repo を記入すると監視対象になる)\n", untracked, lockPath)
 	}
+
+	if *issue && len(drifts) > 0 {
+		results, perr := report.Publish(ctx, client, *issueRepo, drifts)
+		for _, r := range results {
+			fmt.Printf("Issue %s#%d(%s): %s\n", *issueRepo, r.Number, r.Skill, publishLabel(r.Action))
+		}
+		if perr != nil {
+			return len(drifts) > 0, fmt.Errorf("check: Issueの報告に失敗した: %w", perr)
+		}
+	}
+
 	switch {
 	case failures > 0:
-		return driftCount > 0, fmt.Errorf("check: %d件のスキルで上流の取得に失敗した", failures)
-	case driftCount > 0:
-		fmt.Printf("ドリフトを%d件検知した。上流の変更内容を確認してください\n", driftCount)
+		return len(drifts) > 0, fmt.Errorf("check: %d件のスキルで上流の取得に失敗した", failures)
+	case len(drifts) > 0:
+		fmt.Printf("ドリフトを%d件検知した。上流の変更内容を確認してください\n", len(drifts))
 		return true, nil
 	default:
 		fmt.Println("ドリフトなし")
 		return false, nil
+	}
+}
+
+func publishLabel(a report.Action) string {
+	switch a {
+	case report.ActionCreated:
+		return "新規作成した"
+	case report.ActionUpdated:
+		return "本文を更新した(上流がさらに進行)"
+	default:
+		return "既報のためスキップ"
 	}
 }
 
