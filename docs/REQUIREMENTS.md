@@ -75,7 +75,8 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   - [x] goreleaser設定(.goreleaser.yaml)と tags:v* でリリースするworkflowを追加。
     `goreleaser check` と `--snapshot` ビルドでアーカイブ名・version注入を検証済み
   - [x] action.ymlをreleaseバイナリDL方式へ切替(version入力 > actionのref > 最新releaseで解決)
-  - [ ] `v0.1.0` タグを打って初回リリースを公開(実際のRelease生成はこのタグpushで走る)
+  - [x] `v0.1.0` タグを打って初回リリースを公開。release workflowが成功し、6プラットフォームの
+    バイナリ+checksums.txtを生成。`releases/latest/download/` 経路のDL・展開が実際に動くことを確認
 
 ## 将来(今は設計だけ意識)
 
