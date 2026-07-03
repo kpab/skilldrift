@@ -19,7 +19,7 @@ inputs:
     description: Issueを立てるリポジトリ(owner/name)
     default: ${{ github.repository }}
   token:
-    description: GitHub APIトークン(上流の取得とIssue作成に使う。Issue作成には issues: write が必要)
+    description: "GitHub APIトークン(上流の取得とIssue作成に使う。Issue作成には issues: write 権限が必要)"
     default: ${{ github.token }}
   fail-on-drift:
     description: ドリフト検知時にステップを失敗させるか(Issue通知だけで足りるなら "false" のまま)
