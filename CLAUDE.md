@@ -15,7 +15,8 @@ lockfileで出自を追跡し、ドリフト検知→リスク再評価→Issue�
 
 - `main.go` — CLIエントリポイント(サブコマンド: init / check / version)。標準flagベース
 - `docs/` — IDEA.md(経緯)、REQUIREMENTS.md(要件・マイルストーン)
-- ロジックが育ったら `internal/` に切り出す(lockfile・上流取得・diff検知)
+- `internal/lockfile/` — lockfileスキーマ・読み書き・コンテンツハッシュ
+- ロジックが育ったら `internal/` に切り出す(上流取得・diff検知)
 
 ## コマンド
 

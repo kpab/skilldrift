@@ -50,7 +50,7 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
 - **M1(最小の動くもの)**: `skilldrift init` と `skilldrift check` がローカルで動く
   — lockfileを生成し、上流に変更があれば「どのスキルがどう変わったか」をターミナルに出せる。
   検証方法: 自分のskillsリポジトリのクローンで init → 上流の古いcommitをlockに指定 → check でdiff検出を確認
-  - [ ] lockfileスキーマを設計し、Go構造体+読み書き(internal/lockfile)を実装。変更粒度(commit vs コンテンツハッシュ)もここで確定
+  - [x] lockfileスキーマを設計し、Go構造体+読み書き(internal/lockfile)を実装。変更粒度(commit vs コンテンツハッシュ)もここで確定
   - [ ] `init`: スキルディレクトリを走査し、出自未記入のエントリを持つlockfileを生成(出自は手で埋める前提)
   - [ ] 上流取得: lockfileのrepo参照から現在のcommit/ファイル内容を取得(gh CLIまたはGitHub API)
   - [ ] `check`: lockfileと上流を比較し、変わったスキルとdiff要約をターミナル出力。終了コードで有無を表現
@@ -65,10 +65,13 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
 - マルチエージェント統合監査ログ(agmsg SQLite基盤の流用)
 - lockfileスキーマはスキル以外(MCP設定・plugin)にも拡張できる形にしておく
 
+## 決定事項
+
+- **変更検知の粒度はハイブリッド**(M1で確定): 最終判定はファイル単位のコンテンツハッシュ(sha256)。commit単位だと上流のスキル外変更で誤検知し、force-push等でcommitが動かないすり替えも見逃すため。commitは`check`の短絡判定(一致なら取得省略)とdrift時のdiff起点として併記する。SKILL.md以外の同梱ファイル(スクリプト等)もスキルディレクトリ配下を再帰的に全て対象とする。スキーマの詳細は `internal/lockfile` のパッケージコメント参照
+
 ## 未定事項
 
 - CLIフレームワーク(cobra vs stdlib)— M1実装時に決定
 - SkillSpectorのCI上での導入方法(pip / uvx / バイナリ)— M3で調査
-- 上流の「変更」の粒度(commit単位 vs コンテンツハッシュ単位、SKILL.md以外の同梱ファイルの扱い)— M1実装中に確定
 - Issueの重複防止(同じdriftで毎回立てない仕組み)— M2で設計
 - Action名・marketplace公開するか — M2以降
