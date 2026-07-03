@@ -61,7 +61,10 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   - [x] `check -issue`: ドリフトをGitHub Issueとして報告(internal/report)。重複防止つき
   - [x] tarball取得のキャッシュ(同一repo×commitは1回だけ取得)
   - [x] composite action(action.yml)。当面はactionのref時点のソースをgo buildする方式
-  - [ ] ドッグフーディング: kpab/claude-fable-5-skills にschedule導入し、実Issueが立つのを確認
+  - [x] ドッグフーディング: kpab/claude-fable-5-skills にschedule導入(毎日09:00 JST)。
+    古いcommit(cbb4851)を基準にしたlockfileで effort-calibrator のドリフトを検知し、
+    Issue #2 が自動生成されるのを確認。再実行で既報スキップ、fingerprint変化時は
+    本文更新+コメント通知になることも実runで確認済み
 - **M3(リスク評価)**: SkillSpectorラップによる新旧スコア比較をIssue本文に組み込む。goreleaserでv0.1.0公開
 
 ## 将来(今は設計だけ意識)
