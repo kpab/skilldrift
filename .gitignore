@@ -1,0 +1,6 @@
+# バイナリ
+/skilldrift
+dist/
+
+# エディタ・OS
+.DS_Store
