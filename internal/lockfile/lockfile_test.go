@@ -256,6 +256,32 @@ func TestReconcile(t *testing.T) {
 	}
 }
 
+func TestDiffFiles(t *testing.T) {
+	locked := map[string]string{
+		"SKILL.md":     "sha256:aaa",
+		"scripts/x.sh": "sha256:bbb",
+		"gone.txt":     "sha256:ccc",
+	}
+	current := map[string]string{
+		"SKILL.md":     "sha256:aaa", // 同一
+		"scripts/x.sh": "sha256:XXX", // 変更
+		"new.py":       "sha256:ddd", // 追加
+	}
+	got := DiffFiles(locked, current)
+	want := []FileChange{
+		{Path: "gone.txt", Kind: ChangeRemoved},
+		{Path: "new.py", Kind: ChangeAdded},
+		{Path: "scripts/x.sh", Kind: ChangeModified},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DiffFiles = %+v, want %+v", got, want)
+	}
+
+	if diff := DiffFiles(locked, locked); len(diff) != 0 {
+		t.Errorf("同一マップでdiffが出た: %+v", diff)
+	}
+}
+
 func TestHashBytes(t *testing.T) {
 	// echo -n hello | shasum -a 256
 	want := "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"

@@ -53,8 +53,10 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   - [x] lockfileスキーマを設計し、Go構造体+読み書き(internal/lockfile)を実装。変更粒度(commit vs コンテンツハッシュ)もここで確定
   - [x] `init`: スキルディレクトリを走査し、出自未記入のエントリを持つlockfileを生成(出自は手で埋める前提)
   - [x] 上流取得: lockfileのrepo参照から現在のcommit/ファイル内容を取得(gh CLIまたはGitHub API)
-  - [ ] `check`: lockfileと上流を比較し、変わったスキルとdiff要約をターミナル出力。終了コードで有無を表現
-  - [ ] 実データ検証: 自分のskillsリポジトリで古いcommitを指定してドリフト検出を確認
+  - [x] `check`: lockfileと上流を比較し、変わったスキルとdiff要約をターミナル出力。終了コードで有無を表現
+  - [x] 実データ検証: 自分のskillsリポジトリで古いcommitを指定してドリフト検出を確認
+    (kpab/claude-fable-5-skills のクローンで cbb4851 を指定 → effort-calibrator の SKILL.md 変更を検知、
+    他9スキルは「commit進行のみ・内容同一」と正しく判定。git diff --stat と完全一致)
 - **M2(CI統合)**: composite action化 + Issue自動生成。自分のskillsリポジトリにschedule実行で導入し、実際にIssueが立つところまで
 - **M3(リスク評価)**: SkillSpectorラップによる新旧スコア比較をIssue本文に組み込む。goreleaserでv0.1.0公開
 
@@ -69,6 +71,7 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
 
 - **変更検知の粒度はハイブリッド**(M1で確定): 最終判定はファイル単位のコンテンツハッシュ(sha256)。commit単位だと上流のスキル外変更で誤検知し、force-push等でcommitが動かないすり替えも見逃すため。commitは`check`の短絡判定(一致なら取得省略)とdrift時のdiff起点として併記する。SKILL.md以外の同梱ファイル(スクリプト等)もスキルディレクトリ配下を再帰的に全て対象とする。スキーマの詳細は `internal/lockfile` のパッケージコメント参照
 
+- **checkの終了コードは 0=ドリフトなし / 1=ドリフト検知 / 2=エラー**(M1で確定): grep等の慣例に合わせ、CIで「ドリフト」と「実行失敗」を区別できるようにする
 - **上流取得はGitHub API直叩き**(M1で確定): gh CLIに依存すると利用者の導入前提が増えるため、標準ライブラリのみでREST APIを叩く。認証は`GITHUB_TOKEN`/`GH_TOKEN`(任意)。ファイル内容はtarball APIでリポジトリ×commitあたり1リクエストにまとめ、匿名rate limit(60回/時)でも実用にする
 
 ## 未定事項
@@ -76,4 +79,5 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
 - CLIフレームワーク(cobra vs stdlib)— M1実装時に決定
 - SkillSpectorのCI上での導入方法(pip / uvx / バイナリ)— M3で調査
 - Issueの重複防止(同じdriftで毎回立てない仕組み)— M2で設計
+- tarball取得のキャッシュ(現状は同一repo×commitでもスキルごとに再取得。スキル数が多いと無駄)— M2で改善
 - Action名・marketplace公開するか — M2以降

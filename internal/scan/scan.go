@@ -14,6 +14,8 @@ import (
 // Skills は root 以下を走査し、SKILL.md を含むディレクトリをスキルとして返す。
 // 返り値の Source は出自未記入のテンプレート(typeのみ)で、手で埋める前提。
 // スキルディレクトリの内側はそのスキルの一部として扱い、別スキルとしては走査しない。
+// root直下のSKILL.mdは、配下にスキルが1つも無い場合のみ「リポジトリ全体が
+// 単一スキル」として扱う(一覧用にルートへSKILL.mdを置くリポジトリがあるため)。
 func Skills(root string) ([]lockfile.Skill, error) {
 	var skills []lockfile.Skill
 	seen := map[string]string{} // name -> path(重複検出用)
@@ -21,7 +23,7 @@ func Skills(root string) ([]lockfile.Skill, error) {
 		if err != nil {
 			return err
 		}
-		if !d.IsDir() {
+		if !d.IsDir() || path == root {
 			return nil
 		}
 		if d.Name() == ".git" || d.Name() == "node_modules" {
@@ -36,14 +38,6 @@ func Skills(root string) ([]lockfile.Skill, error) {
 			return err
 		}
 		name := d.Name()
-		if rel == "." {
-			// リポジトリルート自体が単一スキルのケース
-			abs, err := filepath.Abs(path)
-			if err != nil {
-				return err
-			}
-			name = filepath.Base(abs)
-		}
 		if prev, dup := seen[name]; dup {
 			return fmt.Errorf("スキル名 %q が重複している(%s と %s)。ディレクトリ名はリポジトリ内で一意にしてください", name, prev, rel)
 		}
@@ -64,6 +58,25 @@ func Skills(root string) ([]lockfile.Skill, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if len(skills) == 0 {
+		if _, err := os.Stat(filepath.Join(root, "SKILL.md")); err == nil {
+			abs, err := filepath.Abs(root)
+			if err != nil {
+				return nil, err
+			}
+			files, err := hashDir(root)
+			if err != nil {
+				return nil, err
+			}
+			skills = append(skills, lockfile.Skill{
+				Name:   filepath.Base(abs),
+				Path:   ".",
+				Source: lockfile.Source{Type: lockfile.SourceTypeGitHub},
+				Files:  files,
+			})
+		}
+	}
 	return skills, nil
 }
 
@@ -76,6 +89,9 @@ func hashDir(dir string) (map[string]string, error) {
 			return err
 		}
 		if d.IsDir() {
+			if d.Name() == ".git" || d.Name() == "node_modules" {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		if !d.Type().IsRegular() {

@@ -188,6 +188,43 @@ func (lf *Lockfile) Reconcile(found []Skill) Changes {
 	return ch
 }
 
+// ChangeKind はファイル変更の種別。
+type ChangeKind string
+
+const (
+	ChangeAdded    ChangeKind = "added"
+	ChangeRemoved  ChangeKind = "removed"
+	ChangeModified ChangeKind = "modified"
+)
+
+// FileChange はスキル内の1ファイルの変更。
+type FileChange struct {
+	Path string
+	Kind ChangeKind
+}
+
+// DiffFiles はlockfileに記録したハッシュ(locked)と上流の現在のハッシュ(current)を
+// 比較し、変更をパス昇順で返す。空ならドリフトなし。
+func DiffFiles(locked, current map[string]string) []FileChange {
+	var changes []FileChange
+	for p, h := range locked {
+		cur, ok := current[p]
+		switch {
+		case !ok:
+			changes = append(changes, FileChange{Path: p, Kind: ChangeRemoved})
+		case cur != h:
+			changes = append(changes, FileChange{Path: p, Kind: ChangeModified})
+		}
+	}
+	for p := range current {
+		if _, ok := locked[p]; !ok {
+			changes = append(changes, FileChange{Path: p, Kind: ChangeAdded})
+		}
+	}
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
+	return changes
+}
+
 // HashBytes は b のコンテンツハッシュ表現("sha256:<hex>")を返す。
 // Skill.Files の値はこの形式で記録する。
 func HashBytes(b []byte) string {

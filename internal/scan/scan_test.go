@@ -95,6 +95,45 @@ func TestSkillsRootIsSkill(t *testing.T) {
 	}
 }
 
+func TestSkillsRootSkillMdWithNestedSkills(t *testing.T) {
+	// 一覧用にルートへSKILL.mdを置きつつ配下に個別スキルを持つリポジトリ
+	// (kpab/claude-fable-5-skills の構成)ではネスト側を優先する
+	root := t.TempDir()
+	writeFile(t, root, "SKILL.md", "# 一覧用")
+	writeFile(t, root, "skills/alpha/SKILL.md", "# alpha")
+	writeFile(t, root, "skills/beta/SKILL.md", "# beta")
+
+	got, err := Skills(root)
+	if err != nil {
+		t.Fatalf("Skills: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("スキル%d件検出、2件(ルート除外)を期待: %+v", len(got), got)
+	}
+	for _, s := range got {
+		if s.Path == "." {
+			t.Error("ルートがスキルとして混入している")
+		}
+	}
+}
+
+func TestSkillsRootFallbackSkipsGit(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "SKILL.md", "# single")
+	writeFile(t, root, ".git/config", "gitの中身は対象外")
+
+	got, err := Skills(root)
+	if err != nil {
+		t.Fatalf("Skills: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("スキル%d件検出、1件を期待", len(got))
+	}
+	if _, ok := got[0].Files[".git/config"]; ok {
+		t.Error(".git配下がFilesに含まれている")
+	}
+}
+
 func TestSkillsDuplicateName(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "a/foo/SKILL.md", "x")
