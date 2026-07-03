@@ -50,7 +50,7 @@ jobs:
 
 ## ステータス
 
-開発中(M3: リスク再評価まで実装)。計画は docs/REQUIREMENTS.md を参照。
+開発中(M3: リスク再評価とgoreleaserによる配布まで実装。v0.1.0タグの公開が次)。計画は docs/REQUIREMENTS.md を参照。
 
 ## License
 

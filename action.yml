@@ -27,6 +27,9 @@ inputs:
   scan-risk:
     description: ドリフト検知時にSkillSpectorで新旧リスクを再評価し、Issueにスコア比較を載せるか
     default: "true"
+  version:
+    description: 使う skilldrift のバージョン(例 "v0.1.0")。既定はactionのref、refがバージョンでなければ最新release
+    default: ""
 
 outputs:
   drifted:
@@ -36,15 +39,45 @@ outputs:
 runs:
   using: composite
   steps:
-    # releaseバイナリが出るまでの暫定として、actionのref時点のソースをビルドして使う
-    # (バイナリDL方式への切替はM3のgoreleaser導入時)
-    - uses: actions/setup-go@v5
-      with:
-        go-version-file: ${{ github.action_path }}/go.mod
-        cache: false
+    # GitHub Releases のバイナリをDLして使う(goreleaserが命名した
+    # skilldrift_<goos>_<goarch>.tar.gz を取得)。
+    # バージョンは version 入力 > actionのref(vX.Y.Z形式のとき) > 最新release の順で決める。
+    - id: download
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        arch=$(uname -m)
+        case "$arch" in
+          x86_64|amd64) arch=amd64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "未対応のアーキテクチャ: $arch" >&2; exit 1 ;;
+        esac
 
-    - shell: bash
-      run: go build -C "$GITHUB_ACTION_PATH" -o "$RUNNER_TEMP/skilldrift" .
+        ver="$INPUT_VERSION"
+        if [ -z "$ver" ]; then
+          case "$ACTION_REF" in
+            v[0-9]*) ver="$ACTION_REF" ;;   # vX.Y.Z でピンされていればそのrelease
+            *)       ver="latest" ;;         # main等ブランチ参照なら最新release
+          esac
+        fi
+
+        asset="skilldrift_${os}_${arch}.tar.gz"
+        if [ "$ver" = "latest" ]; then
+          url="https://github.com/kpab/skilldrift/releases/latest/download/${asset}"
+        else
+          url="https://github.com/kpab/skilldrift/releases/download/${ver}/${asset}"
+        fi
+
+        echo "skilldrift ${ver} (${os}/${arch}) を取得: $url"
+        if ! curl -fsSL "$url" -o "$RUNNER_TEMP/skilldrift.tar.gz"; then
+          echo "release バイナリのDLに失敗した($url)。version入力かactionのrefを確認してください" >&2
+          exit 1
+        fi
+        tar -xzf "$RUNNER_TEMP/skilldrift.tar.gz" -C "$RUNNER_TEMP" skilldrift
+        chmod +x "$RUNNER_TEMP/skilldrift"
 
     # リスク再評価に使う外部スキャナー。scan-risk が false ならスキップし、
     # skilldrift 側も skillspector 不在を検知して自動でリスク評価を飛ばす。

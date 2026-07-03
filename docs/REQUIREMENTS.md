@@ -72,7 +72,10 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   - [x] `check -scan`(既定ON・未導入なら自動スキップ): ドリフト時に旧=手元の現行dir・新=上流の取得ファイルを再スキャンしDriftに付与
   - [x] Issue本文に新旧リスク比較(スコア/深刻度/推奨の表+悪化警告)を組み込む。fingerprintには含めない
   - [x] action.yml: `uv`でskillspectorを導入し `scan-risk` 入力(既定true)を追加
-  - [ ] goreleaserでv0.1.0公開。action.ymlをreleaseバイナリDL方式へ切替
+  - [x] goreleaser設定(.goreleaser.yaml)と tags:v* でリリースするworkflowを追加。
+    `goreleaser check` と `--snapshot` ビルドでアーカイブ名・version注入を検証済み
+  - [x] action.ymlをreleaseバイナリDL方式へ切替(version入力 > actionのref > 最新releaseで解決)
+  - [ ] `v0.1.0` タグを打って初回リリースを公開(実際のRelease生成はこのタグpushで走る)
 
 ## 将来(今は設計だけ意識)
 
@@ -101,9 +104,10 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   スコアはスキャナーのバージョンや非決定性で揺れうるので同一性判定に使うのは不適切)。
   スキャンは決定的でAPIキー不要な `--no-llm`(静的解析のみ)で行う
 
-- **composite actionは当面go build方式**(M2で確定): まだreleaseが無いため、
-  actionのref時点のソースを `actions/setup-go` + `go build` で使う(実行時に自然にrefへピン留めされる)。
-  releaseバイナリDL方式への切替はM3のgoreleaser導入とセットで行う
+- **composite actionはreleaseバイナリDL方式**(M3で切替): goreleaserが命名した
+  `skilldrift_<goos>_<goarch>.tar.gz` を GitHub Releases から `curl` で取得して実行する。
+  取得バージョンは version 入力 > actionのref(vX.Y.Z形式のとき) > 最新release の順で解決。
+  M2まではreleaseが無かったため `actions/setup-go` + `go build` の暫定方式だった
 
 - **上流取得はGitHub API直叩き**(M1で確定): gh CLIに依存すると利用者の導入前提が増えるため、標準ライブラリのみでREST APIを叩く。認証は`GITHUB_TOKEN`/`GH_TOKEN`(任意)。ファイル内容はtarball APIでリポジトリ×commitあたり1リクエストにまとめ、匿名rate limit(60回/時)でも実用にする
 

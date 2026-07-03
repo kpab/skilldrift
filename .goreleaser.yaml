@@ -1,0 +1,52 @@
+# goreleaser v2 設定。`git tag vX.Y.Z` を push すると
+# .github/workflows/release.yml が全プラットフォームのバイナリ・
+# checksums・GitHub Release を生成する。
+# ローカル検証: goreleaser check / goreleaser release --snapshot --clean
+version: 2
+
+project_name: skilldrift
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: skilldrift
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # main.version にリリースのバージョンを埋め込む(`skilldrift version` で表示)
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  # action.yml が組み立てるDL URLと一致させるため、バージョンを含めない
+  # 命名(skilldrift_<goos>_<goarch>)にする。windowsのみzip。
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  draft: false
