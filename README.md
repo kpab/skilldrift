@@ -1,35 +1,37 @@
 # skilldrift
 
-Dependabot for Claude Code Skills — 導入済みスキルの上流変更を監視し、ドリフトを検知してリスク再評価付きIssueを立てるCLI + GitHub Action。
+English | [日本語](README.ja.md)
 
-既存のスキルスキャナーが「導入前の一発スキャン」で止まるのに対し、skilldriftは**導入後**を見張る: 信頼して入れたスキルが更新で中身を変えたとき、それに気付けるようにする。
+Dependabot for Claude Code Skills — a CLI + GitHub Action that watches installed skills for upstream changes, detects drift, and files Issues with a re-evaluated risk assessment.
 
-## 使い方
+Existing skill scanners stop at a one-shot "pre-install scan". skilldrift watches what happens **after** install: when a skill you trusted and adopted changes its contents through an update, skilldrift makes sure you notice.
+
+## Usage
 
 ### CLI
 
 ```sh
-# スキルの出自を skilldrift.lock に記録(source.repo / commit は手で記入する)
+# Record each skill's provenance into skilldrift.lock (fill in source.repo / commit by hand)
 skilldrift init
 
-# 上流との差分を検知(終了コード: 0=ドリフトなし / 1=ドリフト検知 / 2=エラー)
+# Detect diffs against upstream (exit codes: 0=no drift / 1=drift detected / 2=error)
 skilldrift check
 
-# ドリフト検知時にGitHub Issueも作成/更新する
+# Also create/update a GitHub Issue when drift is detected
 GITHUB_TOKEN=... skilldrift check -issue -issue-repo owner/repo
 ```
 
-ドリフトを検知したスキルは、[SkillSpector](https://github.com/NVIDIA/SkillSpector) が導入されていれば手元の現行版と上流の新版を再スキャンし、新旧のリスクスコアを比較して結果をターミナルとIssueに載せる(未導入なら自動でスキップ)。無効化するには `-scan=false`。
+For any skill where drift is detected, if [SkillSpector](https://github.com/NVIDIA/SkillSpector) is installed, skilldrift re-scans both your current local version and the new upstream version, compares the old and new risk scores, and reports the result to the terminal and the Issue (it is skipped automatically when SkillSpector is not installed). Disable it with `-scan=false`.
 
 ### GitHub Action
 
-スキルを管理しているリポジトリに `skilldrift.lock` をコミットした上で、workflowを置く:
+Commit `skilldrift.lock` to the repository that manages your skills, then add a workflow:
 
 ```yaml
 name: skilldrift
 on:
   schedule:
-    - cron: "0 0 * * *" # 毎日 09:00 JST
+    - cron: "0 0 * * *" # 09:00 JST daily
   workflow_dispatch:
 
 permissions:
@@ -44,13 +46,13 @@ jobs:
       - uses: kpab/skilldrift@main
 ```
 
-ドリフトを検知するとスキルごとにIssueが立つ。同じ内容のopen Issueがある間は重複して立てず、上流がさらに進んだ場合は既存Issueの本文を更新してコメントで通知する。
+When drift is detected, one Issue is filed per skill. While an open Issue with the same content exists, no duplicate is filed; if upstream advances further, the existing Issue's body is updated and a comment notifies you.
 
-デフォルトでは SkillSpector をactionが `uv` で導入し、Issueに新旧リスクスコアの比較を載せる。導入の手間や実行時間を避けたい場合は `with: { scan-risk: "false" }` で無効化できる。
+By default the action installs SkillSpector via `uv` and includes an old-vs-new risk score comparison in the Issue. To avoid the setup and runtime cost, disable it with `with: { scan-risk: "false" }`.
 
-## ステータス
+## Status
 
-M3完了(リスク再評価・goreleaserによる配布・v0.1.0公開)。計画は docs/REQUIREMENTS.md を参照。
+M3 complete (risk re-evaluation, distribution via goreleaser, v0.1.0 released). See docs/REQUIREMENTS.md for the plan.
 
 ## License
 
