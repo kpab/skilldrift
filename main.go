@@ -186,6 +186,12 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 			continue
 		}
 
+		newHashes := make(map[string]string, len(changes))
+		for _, c := range changes {
+			if h, ok := current[c.Path]; ok {
+				newHashes[c.Path] = h
+			}
+		}
 		drifts = append(drifts, report.Drift{
 			Skill:     s.Name,
 			Repo:      s.Source.Repo,
@@ -193,6 +199,7 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 			OldCommit: s.Source.Commit,
 			NewCommit: sha,
 			Changes:   changes,
+			NewHashes: newHashes,
 		})
 		fmt.Printf("\nドリフト: %s(%s", s.Name, s.Source.Repo)
 		if s.Source.Subdir != "" {

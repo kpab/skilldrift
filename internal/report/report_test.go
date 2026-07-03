@@ -21,6 +21,10 @@ func sampleDrift() Drift {
 			{Path: "SKILL.md", Kind: lockfile.ChangeModified},
 			{Path: "scripts/new.sh", Kind: lockfile.ChangeAdded},
 		},
+		NewHashes: map[string]string{
+			"SKILL.md":       "sha256:1111",
+			"scripts/new.sh": "sha256:2222",
+		},
 	}
 }
 
@@ -30,16 +34,23 @@ func TestFingerprint(t *testing.T) {
 		t.Error("同じドリフトのfingerprintが一致しない")
 	}
 
+	// スキルと無関係なcommitで上流が進んでも、変更内容が同じなら同一視する
 	moved := sampleDrift()
 	moved.NewCommit = strings.Repeat("c", 40)
-	if Fingerprint(d) == Fingerprint(moved) {
-		t.Error("上流commitが違えばfingerprintも変わるはず")
+	if Fingerprint(d) != Fingerprint(moved) {
+		t.Error("変更内容が同じならcommitが進んでもfingerprintは変わらないはず")
 	}
 
 	changed := sampleDrift()
 	changed.Changes = changed.Changes[:1]
 	if Fingerprint(d) == Fingerprint(changed) {
 		t.Error("変更ファイル一覧が違えばfingerprintも変わるはず")
+	}
+
+	rewritten := sampleDrift()
+	rewritten.NewHashes["SKILL.md"] = "sha256:9999"
+	if Fingerprint(d) == Fingerprint(rewritten) {
+		t.Error("変更ファイルの内容が違えばfingerprintも変わるはず")
 	}
 }
 
@@ -138,6 +149,7 @@ func TestPublishUpdatesOnNewFingerprint(t *testing.T) {
 
 	moved := sampleDrift()
 	moved.NewCommit = strings.Repeat("c", 40)
+	moved.NewHashes["SKILL.md"] = "sha256:9999" // 上流でさらに書き換わった
 	results, err := Publish(context.Background(), api, "me/skills", []Drift{moved})
 	if err != nil {
 		t.Fatalf("Publish: %v", err)

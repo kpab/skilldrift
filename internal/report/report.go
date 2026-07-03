@@ -37,15 +37,19 @@ type Drift struct {
 	OldCommit string // lockfileに記録されていたcommit(未記入なら空)
 	NewCommit string
 	Changes   []lockfile.FileChange
+	// NewHashes は変更ファイルの上流での現在のコンテンツハッシュ
+	// (キーはChangesのPath。削除されたファイルは含まない)。Fingerprintの材料。
+	NewHashes map[string]string
 }
 
 // Fingerprint はドリフト内容の同一性判定に使うハッシュ(16桁hex)。
-// 上流の新commitと変更ファイル一覧が同じなら同じ値になる。
+// 変更ファイルの一覧と内容が同じなら同じ値になる。上流のcommitは含めない:
+// スキルに関係ないcommitで上流が進むたびにIssueを更新(通知)しないため。
 func Fingerprint(d Drift) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\n%s\n%s\n%s\n", d.Skill, d.Repo, d.Subdir, d.NewCommit)
+	fmt.Fprintf(h, "%s\n%s\n%s\n", d.Skill, d.Repo, d.Subdir)
 	for _, c := range d.Changes {
-		fmt.Fprintf(h, "%s %s\n", c.Kind, c.Path)
+		fmt.Fprintf(h, "%s %s %s\n", c.Kind, c.Path, d.NewHashes[c.Path])
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }
