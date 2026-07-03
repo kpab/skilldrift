@@ -153,6 +153,41 @@ func (lf *Lockfile) validate() error {
 	return nil
 }
 
+// Changes は Reconcile によるlockfileの変化の要約。
+type Changes struct {
+	Added   []string // 新規に追加したスキル名
+	Removed []string // ローカルから消えたため削除したスキル名
+}
+
+// Reconcile はローカル走査結果 found を現在の承認済みベースラインとして
+// lockfileに反映する。既存エントリの Source(手で記入した出自)は保持し、
+// Path と Files は現状で上書きする。found に無い既存エントリは削除する。
+func (lf *Lockfile) Reconcile(found []Skill) Changes {
+	existing := make(map[string]Skill, len(lf.Skills))
+	for _, s := range lf.Skills {
+		existing[s.Name] = s
+	}
+	var ch Changes
+	foundNames := make(map[string]bool, len(found))
+	skills := make([]Skill, 0, len(found))
+	for _, f := range found {
+		foundNames[f.Name] = true
+		if prev, ok := existing[f.Name]; ok {
+			f.Source = prev.Source
+		} else {
+			ch.Added = append(ch.Added, f.Name)
+		}
+		skills = append(skills, f)
+	}
+	for _, s := range lf.Skills {
+		if !foundNames[s.Name] {
+			ch.Removed = append(ch.Removed, s.Name)
+		}
+	}
+	lf.Skills = skills
+	return ch
+}
+
 // HashBytes は b のコンテンツハッシュ表現("sha256:<hex>")を返す。
 // Skill.Files の値はこの形式で記録する。
 func HashBytes(b []byte) string {

@@ -212,6 +212,50 @@ func TestTracked(t *testing.T) {
 	}
 }
 
+func TestReconcile(t *testing.T) {
+	lf := sampleLockfile() // deep-research(出自記入済み)と local-only
+	found := []Skill{
+		{
+			Name:   "deep-research",
+			Path:   "skills/deep-research",
+			Source: Source{Type: SourceTypeGitHub}, // 走査結果は常に未記入
+			Files:  map[string]string{"SKILL.md": "sha256:updated"},
+		},
+		{
+			Name:   "newcomer",
+			Path:   "skills/newcomer",
+			Source: Source{Type: SourceTypeGitHub},
+			Files:  map[string]string{"SKILL.md": "sha256:new"},
+		},
+	}
+
+	ch := lf.Reconcile(found)
+
+	if !reflect.DeepEqual(ch.Added, []string{"newcomer"}) {
+		t.Errorf("Added = %v", ch.Added)
+	}
+	if !reflect.DeepEqual(ch.Removed, []string{"local-only"}) {
+		t.Errorf("Removed = %v", ch.Removed)
+	}
+	if len(lf.Skills) != 2 {
+		t.Fatalf("Skills = %d件, 2件を期待", len(lf.Skills))
+	}
+	byName := map[string]Skill{}
+	for _, s := range lf.Skills {
+		byName[s.Name] = s
+	}
+	dr := byName["deep-research"]
+	if dr.Source.Repo != "owner/skills-repo" || dr.Source.Commit != "0123abcd" {
+		t.Errorf("既存エントリのSourceが保持されていない: %+v", dr.Source)
+	}
+	if dr.Files["SKILL.md"] != "sha256:updated" {
+		t.Errorf("Filesが走査結果で上書きされていない: %v", dr.Files)
+	}
+	if byName["newcomer"].Tracked() {
+		t.Error("新規エントリが出自記入済みになっている")
+	}
+}
+
 func TestHashBytes(t *testing.T) {
 	// echo -n hello | shasum -a 256
 	want := "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"

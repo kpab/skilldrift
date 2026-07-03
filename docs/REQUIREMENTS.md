@@ -51,7 +51,7 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   — lockfileを生成し、上流に変更があれば「どのスキルがどう変わったか」をターミナルに出せる。
   検証方法: 自分のskillsリポジトリのクローンで init → 上流の古いcommitをlockに指定 → check でdiff検出を確認
   - [x] lockfileスキーマを設計し、Go構造体+読み書き(internal/lockfile)を実装。変更粒度(commit vs コンテンツハッシュ)もここで確定
-  - [ ] `init`: スキルディレクトリを走査し、出自未記入のエントリを持つlockfileを生成(出自は手で埋める前提)
+  - [x] `init`: スキルディレクトリを走査し、出自未記入のエントリを持つlockfileを生成(出自は手で埋める前提)
   - [ ] 上流取得: lockfileのrepo参照から現在のcommit/ファイル内容を取得(gh CLIまたはGitHub API)
   - [ ] `check`: lockfileと上流を比較し、変わったスキルとdiff要約をターミナル出力。終了コードで有無を表現
   - [ ] 実データ検証: 自分のskillsリポジトリで古いcommitを指定してドリフト検出を確認
