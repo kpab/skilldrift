@@ -38,6 +38,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: kpab/skilldrift@main
 ```
 
