@@ -68,6 +68,11 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
     通知されるのは自分のコミットだけで実用価値がないため)。実利用としてのドッグフーディングは
     第三者のOSSスキルをvendorするリポジトリで行う(M3の検証と合わせて用意する)
 - **M3(リスク評価)**: SkillSpectorラップによる新旧スコア比較をIssue本文に組み込む。goreleaserでv0.1.0公開
+  - [x] `internal/riskscan`: skillspector CLIをラップ(`scan --format json --no-llm`)。exit 0/1は正常JSON・2はエラー
+  - [x] `check -scan`(既定ON・未導入なら自動スキップ): ドリフト時に旧=手元の現行dir・新=上流の取得ファイルを再スキャンしDriftに付与
+  - [x] Issue本文に新旧リスク比較(スコア/深刻度/推奨の表+悪化警告)を組み込む。fingerprintには含めない
+  - [x] action.yml: `uv`でskillspectorを導入し `scan-risk` 入力(既定true)を追加
+  - [ ] goreleaserでv0.1.0公開。action.ymlをreleaseバイナリDL方式へ切替
 
 ## 将来(今は設計だけ意識)
 
@@ -89,6 +94,13 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   ラベルでの検索に依存しないのは、ラベル未作成のリポジトリでも壊れないようにするため
   (`skilldrift` ラベルは人間向けのフィルタとして付与はする)
 
+- **リスク再評価の基準は「手元の現行版 vs 上流の新版」**(M3で確定): 旧側は上流の旧commitを再取得せず、
+  リポジトリにコミット済みのローカルのスキルディレクトリをそのままスキャンする。=利用者が現に信頼している状態と、
+  上流が今提示している新版の差分こそが評価したいリスクデルタだから。追加のtarball取得も不要。
+  リスク評価はfingerprintに含めない(内容ハッシュが同じなら再通知しない設計を崩さないため。
+  スコアはスキャナーのバージョンや非決定性で揺れうるので同一性判定に使うのは不適切)。
+  スキャンは決定的でAPIキー不要な `--no-llm`(静的解析のみ)で行う
+
 - **composite actionは当面go build方式**(M2で確定): まだreleaseが無いため、
   actionのref時点のソースを `actions/setup-go` + `go build` で使う(実行時に自然にrefへピン留めされる)。
   releaseバイナリDL方式への切替はM3のgoreleaser導入とセットで行う
@@ -97,6 +109,8 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
 
 ## 未定事項
 
-- CLIフレームワーク(cobra vs stdlib)— M1実装時に決定
-- SkillSpectorのCI上での導入方法(pip / uvx / バイナリ)— M3で調査
+- CLIフレームワーク(cobra vs stdlib)— M1実装時に決定 → stdlib flagで確定
+- SkillSpectorのCI上での導入方法(pip / uvx / バイナリ)— M3で調査 → `uv tool install`(公式推奨)で確定。
+  actionは `astral-sh/setup-uv` + `uv tool install git+https://github.com/NVIDIA/skillspector.git`。
+  CLIは skillspector をPATHから解決し、不在なら静かにスキップする(ローカル利用者に導入を強制しない)
 - Action名・marketplace公開するか — M3以降

@@ -19,6 +19,8 @@ skilldrift check
 GITHUB_TOKEN=... skilldrift check -issue -issue-repo owner/repo
 ```
 
+ドリフトを検知したスキルは、[SkillSpector](https://github.com/NVIDIA/SkillSpector) が導入されていれば手元の現行版と上流の新版を再スキャンし、新旧のリスクスコアを比較して結果をターミナルとIssueに載せる(未導入なら自動でスキップ)。無効化するには `-scan=false`。
+
 ### GitHub Action
 
 スキルを管理しているリポジトリに `skilldrift.lock` をコミットした上で、workflowを置く:
@@ -44,9 +46,11 @@ jobs:
 
 ドリフトを検知するとスキルごとにIssueが立つ。同じ内容のopen Issueがある間は重複して立てず、上流がさらに進んだ場合は既存Issueの本文を更新してコメントで通知する。
 
+デフォルトでは SkillSpector をactionが `uv` で導入し、Issueに新旧リスクスコアの比較を載せる。導入の手間や実行時間を避けたい場合は `with: { scan-risk: "false" }` で無効化できる。
+
 ## ステータス
 
-開発中(M2: CI統合まで完了)。計画は docs/REQUIREMENTS.md を参照。
+開発中(M3: リスク再評価まで実装)。計画は docs/REQUIREMENTS.md を参照。
 
 ## License
 

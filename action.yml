@@ -24,6 +24,9 @@ inputs:
   fail-on-drift:
     description: ドリフト検知時にステップを失敗させるか(Issue通知だけで足りるなら "false" のまま)
     default: "false"
+  scan-risk:
+    description: ドリフト検知時にSkillSpectorで新旧リスクを再評価し、Issueにスコア比較を載せるか
+    default: "true"
 
 outputs:
   drifted:
@@ -43,6 +46,17 @@ runs:
     - shell: bash
       run: go build -C "$GITHUB_ACTION_PATH" -o "$RUNNER_TEMP/skilldrift" .
 
+    # リスク再評価に使う外部スキャナー。scan-risk が false ならスキップし、
+    # skilldrift 側も skillspector 不在を検知して自動でリスク評価を飛ばす。
+    - if: inputs.scan-risk == 'true'
+      uses: astral-sh/setup-uv@v5
+
+    - if: inputs.scan-risk == 'true'
+      shell: bash
+      run: |
+        uv tool install "git+https://github.com/NVIDIA/skillspector.git"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
     - id: check
       shell: bash
       env:
@@ -51,10 +65,14 @@ runs:
         INPUT_CREATE_ISSUE: ${{ inputs.create-issue }}
         INPUT_ISSUE_REPO: ${{ inputs.issue-repo }}
         INPUT_FAIL_ON_DRIFT: ${{ inputs.fail-on-drift }}
+        INPUT_SCAN_RISK: ${{ inputs.scan-risk }}
       run: |
         args=(check -dir "$INPUT_DIR")
         if [ "$INPUT_CREATE_ISSUE" = "true" ]; then
           args+=(-issue -issue-repo "$INPUT_ISSUE_REPO")
+        fi
+        if [ "$INPUT_SCAN_RISK" != "true" ]; then
+          args+=(-scan=false)
         fi
 
         set +e

@@ -40,6 +40,19 @@ type Drift struct {
 	// NewHashes は変更ファイルの上流での現在のコンテンツハッシュ
 	// (キーはChangesのPath。削除されたファイルは含まない)。Fingerprintの材料。
 	NewHashes map[string]string
+
+	// OldRisk/NewRisk は SkillSpector による新旧リスク評価(任意)。
+	// スキャン未実施・未導入なら nil。旧=手元の現行スキル、新=上流の新版。
+	// Fingerprintには含めない(内容ハッシュが同じなら再通知しないため)。
+	OldRisk *Risk
+	NewRisk *Risk
+}
+
+// Risk は SkillSpector のリスク評価を報告用に写した値。
+type Risk struct {
+	Score          int    // 0-100
+	Severity       string // LOW / MEDIUM / HIGH / CRITICAL
+	Recommendation string // SAFE / CAUTION / DO_NOT_INSTALL
 }
 
 // Fingerprint はドリフト内容の同一性判定に使うハッシュ(16桁hex)。
@@ -99,10 +112,93 @@ func Body(d Drift) string {
 		fmt.Fprintf(&b, "- %s: `%s`\n", changeLabel(c.Kind), c.Path)
 	}
 
+	b.WriteString(riskSection(d))
+
 	b.WriteString("\n### 対応\n\n")
 	b.WriteString("問題ない変更なら、ローカルのスキルを上流に合わせて更新し `skilldrift init` を再実行するとlockfileが現状で更新され、このIssueの根拠は解消する。\n")
 	b.WriteString("\n---\n*このIssueは [skilldrift](https://github.com/kpab/skilldrift) が自動生成した。同じスキルの上流がさらに変わると本文を更新する。*\n")
 	return b.String()
+}
+
+// riskSection は新旧のリスク評価を表として描画する。
+// NewRisk が nil(スキャン未実施)なら空文字を返し、本文に節を出さない。
+func riskSection(d Drift) string {
+	if d.NewRisk == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n### リスク再評価(SkillSpector)\n\n")
+	b.WriteString("| 指標 | 現行(手元) | 上流の新版 |\n")
+	b.WriteString("|------|------------|------------|\n")
+	fmt.Fprintf(&b, "| スコア | %s | %d |\n", scoreCell(d.OldRisk), d.NewRisk.Score)
+	fmt.Fprintf(&b, "| 深刻度 | %s | %s |\n", sevCell(d.OldRisk), d.NewRisk.Severity)
+	fmt.Fprintf(&b, "| 推奨 | %s | %s |\n", recCell(d.OldRisk), d.NewRisk.Recommendation)
+
+	if worsened(d.OldRisk, d.NewRisk) {
+		fmt.Fprintf(&b, "\n⚠️ 上流の新版はリスク評価が悪化している(スコア %d→%d、推奨 %s)。取り込みは特に慎重に確認すること。\n",
+			d.OldRisk.Score, d.NewRisk.Score, d.NewRisk.Recommendation)
+	}
+	return b.String()
+}
+
+func scoreCell(r *Risk) string {
+	if r == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%d", r.Score)
+}
+
+func sevCell(r *Risk) string {
+	if r == nil {
+		return "—"
+	}
+	return r.Severity
+}
+
+func recCell(r *Risk) string {
+	if r == nil {
+		return "—"
+	}
+	return r.Recommendation
+}
+
+// worsened は新版のリスクが旧版より悪化したかを返す。
+// スコア増加・深刻度上昇・推奨の悪化のいずれかがあれば true。
+func worsened(old, new *Risk) bool {
+	if old == nil || new == nil {
+		return false
+	}
+	return new.Score > old.Score ||
+		sevRank(new.Severity) > sevRank(old.Severity) ||
+		recRank(new.Recommendation) > recRank(old.Recommendation)
+}
+
+func sevRank(s string) int {
+	switch strings.ToUpper(s) {
+	case "LOW":
+		return 1
+	case "MEDIUM":
+		return 2
+	case "HIGH":
+		return 3
+	case "CRITICAL":
+		return 4
+	default:
+		return 0
+	}
+}
+
+func recRank(s string) int {
+	switch strings.ToUpper(s) {
+	case "SAFE":
+		return 1
+	case "CAUTION":
+		return 2
+	case "DO_NOT_INSTALL":
+		return 3
+	default:
+		return 0
+	}
 }
 
 func changeLabel(k lockfile.ChangeKind) string {

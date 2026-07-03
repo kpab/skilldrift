@@ -79,6 +79,61 @@ func TestBodyMarkerRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBodyRiskSection(t *testing.T) {
+	d := sampleDrift()
+	d.OldRisk = &Risk{Score: 12, Severity: "LOW", Recommendation: "SAFE"}
+	d.NewRisk = &Risk{Score: 55, Severity: "HIGH", Recommendation: "CAUTION"}
+	body := Body(d)
+
+	for _, want := range []string{
+		"リスク再評価(SkillSpector)",
+		"| スコア | 12 | 55 |",
+		"| 深刻度 | LOW | HIGH |",
+		"| 推奨 | SAFE | CAUTION |",
+		"⚠️", // 悪化しているので警告が出る
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("本文に %q が無い:\n%s", want, body)
+		}
+	}
+}
+
+func TestBodyRiskSectionOmittedWhenNoScan(t *testing.T) {
+	body := Body(sampleDrift()) // NewRisk == nil
+	if strings.Contains(body, "リスク再評価") {
+		t.Error("スキャン未実施なのにリスク節が出ている")
+	}
+}
+
+func TestBodyRiskSectionNoWarningWhenNotWorse(t *testing.T) {
+	d := sampleDrift()
+	d.OldRisk = &Risk{Score: 40, Severity: "MEDIUM", Recommendation: "CAUTION"}
+	d.NewRisk = &Risk{Score: 20, Severity: "LOW", Recommendation: "SAFE"}
+	if strings.Contains(Body(d), "⚠️") {
+		t.Error("リスクが下がっているのに警告が出ている")
+	}
+}
+
+func TestBodyRiskSectionOldMissing(t *testing.T) {
+	// 手元のスキャンが失敗して旧側が無い場合は "—" で描く
+	d := sampleDrift()
+	d.NewRisk = &Risk{Score: 30, Severity: "MEDIUM", Recommendation: "CAUTION"}
+	body := Body(d)
+	if !strings.Contains(body, "| スコア | — | 30 |") {
+		t.Errorf("旧側欠落時の描画になっていない:\n%s", body)
+	}
+}
+
+func TestFingerprintIgnoresRisk(t *testing.T) {
+	d := sampleDrift()
+	withRisk := sampleDrift()
+	withRisk.OldRisk = &Risk{Score: 1, Severity: "LOW", Recommendation: "SAFE"}
+	withRisk.NewRisk = &Risk{Score: 99, Severity: "CRITICAL", Recommendation: "DO_NOT_INSTALL"}
+	if Fingerprint(d) != Fingerprint(withRisk) {
+		t.Error("リスク評価はfingerprintに影響してはいけない")
+	}
+}
+
 func TestParseMarkerNonSkilldriftIssue(t *testing.T) {
 	if _, _, ok := parseMarker("ふつうの手書きIssue本文"); ok {
 		t.Error("マーカーの無い本文でok=trueになった")

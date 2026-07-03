@@ -13,6 +13,7 @@ import (
 
 	"github.com/kpab/skilldrift/internal/lockfile"
 	"github.com/kpab/skilldrift/internal/report"
+	"github.com/kpab/skilldrift/internal/riskscan"
 	"github.com/kpab/skilldrift/internal/scan"
 	"github.com/kpab/skilldrift/internal/upstream"
 )
@@ -127,12 +128,17 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 	dir := fset.String("dir", ".", "lockfileのあるリポジトリルート")
 	issue := fset.Bool("issue", false, "ドリフト検知時にGitHub Issueを作成/更新する(要 GITHUB_TOKEN)")
 	issueRepo := fset.String("issue-repo", os.Getenv("GITHUB_REPOSITORY"), "Issueを立てるリポジトリ(owner/name。既定は $GITHUB_REPOSITORY)")
+	scanRisk := fset.Bool("scan", true, "ドリフト検知時にSkillSpectorで新旧リスクを再評価する(skillspector未導入なら自動スキップ)")
 	if err := fset.Parse(args); err != nil {
 		return false, err
 	}
 	if *issue && *issueRepo == "" {
 		return false, fmt.Errorf("check: -issue には -issue-repo(または環境変数 GITHUB_REPOSITORY)が必要")
 	}
+
+	// リスク再評価を有効化するのは、要求(-scan)されていてskillspectorがPATHにある時だけ。
+	scanEnabled := *scanRisk && riskscan.Available()
+	scanRequestedButMissing := *scanRisk && !scanEnabled
 
 	lockPath := filepath.Join(*dir, lockfile.DefaultPath)
 	lf, err := lockfile.Load(lockPath)
@@ -192,7 +198,7 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 				newHashes[c.Path] = h
 			}
 		}
-		drifts = append(drifts, report.Drift{
+		d := report.Drift{
 			Skill:     s.Name,
 			Repo:      s.Source.Repo,
 			Subdir:    s.Source.Subdir,
@@ -200,7 +206,12 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 			NewCommit: sha,
 			Changes:   changes,
 			NewHashes: newHashes,
-		})
+		}
+		if scanEnabled {
+			d.OldRisk, d.NewRisk = assessRisk(ctx, filepath.Join(*dir, s.Path), files)
+		}
+		drifts = append(drifts, d)
+
 		fmt.Printf("\nドリフト: %s(%s", s.Name, s.Source.Repo)
 		if s.Source.Subdir != "" {
 			fmt.Printf(" の %s", s.Source.Subdir)
@@ -210,7 +221,14 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 		for _, c := range changes {
 			fmt.Printf("  %s %s\n", changeLabel(c.Kind), c.Path)
 		}
+		if d.NewRisk != nil {
+			fmt.Printf("  リスク: %s → %s\n", riskLabel(d.OldRisk), riskLabel(d.NewRisk))
+		}
 		fmt.Println()
+	}
+
+	if scanRequestedButMissing && len(drifts) > 0 {
+		fmt.Printf("注意: skillspector が見つからないためリスク再評価はスキップした(導入すればIssueに新旧スコア比較が載る)\n")
 	}
 
 	if untracked > 0 {
@@ -237,6 +255,34 @@ func runCheckWith(client *upstream.Client, args []string) (bool, error) {
 		fmt.Println("ドリフトなし")
 		return false, nil
 	}
+}
+
+// assessRisk は旧(手元のローカルディレクトリ)と新(上流の取得ファイル)を
+// SkillSpectorでスキャンして比較用のリスク評価を返す。
+// 片方のスキャンが失敗しても、もう片方は返す(そのため個別にnil可)。
+func assessRisk(ctx context.Context, localDir string, newFiles map[string][]byte) (old, new *report.Risk) {
+	if r, err := riskscan.Scan(ctx, localDir); err != nil {
+		fmt.Printf("  警告: 手元スキルのリスク評価に失敗した(%s): %v\n", localDir, err)
+	} else {
+		old = toReportRisk(r)
+	}
+	if r, err := riskscan.ScanFiles(ctx, newFiles); err != nil {
+		fmt.Printf("  警告: 上流新版のリスク評価に失敗した: %v\n", err)
+	} else {
+		new = toReportRisk(r)
+	}
+	return old, new
+}
+
+func toReportRisk(r riskscan.Result) *report.Risk {
+	return &report.Risk{Score: r.Score, Severity: r.Severity, Recommendation: r.Recommendation}
+}
+
+func riskLabel(r *report.Risk) string {
+	if r == nil {
+		return "(取得失敗)"
+	}
+	return fmt.Sprintf("%d/%s/%s", r.Score, r.Severity, r.Recommendation)
 }
 
 func publishLabel(a report.Action) string {
