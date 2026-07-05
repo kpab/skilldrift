@@ -4,7 +4,7 @@
 
 Claude Code Skillsのサプライチェーン攻撃は実害段階に入ったが、既存対策は「導入前の一発スキャン」止まりで、信頼済みスキルが更新時に中身を変える攻撃(初回承認後のすり替え)への継続監視は空白。Dependabot/Renovateの発想をskillsエコシステムに輸入する。詳細は docs/IDEA.md 参照。
 
-**成功条件**: 自分の公開skillsリポジトリにGitHub Actionとして導入し、参照している上流スキルの変更を検知してリスク評価付きIssueが自動で立つ。
+**成功条件**: 第三者のスキルをvendorしたリポジトリにGitHub Actionとして導入し、参照している上流スキルの変更を検知してリスク評価付きIssueが自動で立つ。(当初は「自分の公開skillsリポジトリ」を想定したが、自作リポジトリでは上流=自分自身の自己参照になり通知価値がないと判明したため、第三者スキルのvendorへ修正。M3で `kpab/skilldrift-vendor-lab` にて達成)
 
 ## ユーザー
 
@@ -77,6 +77,18 @@ Claude Code Skillsのサプライチェーン攻撃は実害段階に入った�
   - [x] action.ymlをreleaseバイナリDL方式へ切替(version入力 > actionのref > 最新releaseで解決)
   - [x] `v0.1.0` タグを打って初回リリースを公開。release workflowが成功し、6プラットフォームの
     バイナリ+checksums.txtを生成。`releases/latest/download/` 経路のDL・展開が実際に動くことを確認
+  - [x] GitHub Marketplace公開(v0.1.2)。actionのname衝突(既存user `skilldrift`)を一意な
+    表示名へ、descriptionを125文字制限に収め、英語化。listing: Skilldrift — Skills Drift Monitor
+  - [x] **第三者スキルでの実利用ドッグフーディング完了**(成功条件の達成)。検証用public repo
+    `kpab/skilldrift-vendor-lab` を作成し、公開済みmarketplace action(kpab/skilldrift@v0.1.2)を
+    schedule/dispatchで運用。2モードで全パス確認:
+    - Mode A(本物ドリフト): 第三者 `ljagiello/ctf-skills`(MIT)から ctf-web/crypto/pwn を
+      古いcommit基準でvendor → 上流HEADとの差分をIssue自動生成。再runで既報スキップ(fingerprint重複防止)も実証
+    - Mode B(リスク悪化検知): fork `kpab/ctf-skills` に良性スキル safe-formatter を置き、
+      疑わしいスクリプト(curl|bash+env exfil、宛先example.comの無害デモ)を注入 → SkillSpectorスコア
+      46/MEDIUM/CAUTION → 68/HIGH/DO_NOT_INSTALL の悪化をIssue本文の比較表+警告で表示
+    - 知見: リスク悪化デモにCTFスキルは不適。攻撃技法スキルは素で100/CRITICALに振り切れており
+      delta が見えないため、素が低〜中リスクの良性スキルで行う必要がある
 
 ## 将来(今は設計だけ意識)
 
