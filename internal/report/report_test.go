@@ -88,13 +88,36 @@ func TestBodyRiskSection(t *testing.T) {
 	for _, want := range []string{
 		"リスク再評価(SkillSpector)",
 		"| スコア | 12 | 55 |",
-		"| 深刻度 | LOW | HIGH |",
-		"| 推奨 | SAFE | CAUTION |",
-		"⚠️", // 悪化しているので警告が出る
+		"badge/LOW-success",   // 旧深刻度のバッジ
+		"badge/HIGH-orange",   // 新深刻度のバッジ
+		"badge/SAFE-success",  // 旧推奨のバッジ
+		"badge/CAUTION-yellow",
+		"style=for-the-badge", // HIGHなので専用バナー枠が出る
+		"[!CAUTION]",          // 悪化しているので警告枠が出る
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("本文に %q が無い:\n%s", want, body)
 		}
+	}
+}
+
+func TestBodyRiskBannerOnlyForHighRisk(t *testing.T) {
+	// MEDIUM/CAUTION止まりなら幅広バナー枠は出さない
+	d := sampleDrift()
+	d.OldRisk = &Risk{Score: 10, Severity: "LOW", Recommendation: "SAFE"}
+	d.NewRisk = &Risk{Score: 40, Severity: "MEDIUM", Recommendation: "CAUTION"}
+	if strings.Contains(Body(d), "for-the-badge") {
+		t.Error("MEDIUMなのに高リスク専用バナーが出ている")
+	}
+
+	// DO_NOT_INSTALLなら深刻度に関わらずバナーを出す
+	d.NewRisk = &Risk{Score: 40, Severity: "MEDIUM", Recommendation: "DO_NOT_INSTALL"}
+	body := Body(d)
+	if !strings.Contains(body, "for-the-badge") {
+		t.Errorf("DO_NOT_INSTALLなのに高リスク専用バナーが出ない:\n%s", body)
+	}
+	if !strings.Contains(body, "badge/RECOMMENDATION-DO__NOT__INSTALL-critical") {
+		t.Errorf("推奨バナーのエスケープ・色が想定と違う:\n%s", body)
 	}
 }
 
@@ -109,7 +132,7 @@ func TestBodyRiskSectionNoWarningWhenNotWorse(t *testing.T) {
 	d := sampleDrift()
 	d.OldRisk = &Risk{Score: 40, Severity: "MEDIUM", Recommendation: "CAUTION"}
 	d.NewRisk = &Risk{Score: 20, Severity: "LOW", Recommendation: "SAFE"}
-	if strings.Contains(Body(d), "⚠️") {
+	if strings.Contains(Body(d), "[!CAUTION]") {
 		t.Error("リスクが下がっているのに警告が出ている")
 	}
 }

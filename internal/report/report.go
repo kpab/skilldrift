@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -120,7 +121,8 @@ func Body(d Drift) string {
 	return b.String()
 }
 
-// riskSection は新旧のリスク評価を表として描画する。
+// riskSection は新旧のリスク評価をバッジで色分けした表として描画する。
+// 新版がHIGH以上(またはDO_NOT_INSTALL)なら、表の前に専用の幅広バナー枠を出す。
 // NewRisk が nil(スキャン未実施)なら空文字を返し、本文に節を出さない。
 func riskSection(d Drift) string {
 	if d.NewRisk == nil {
@@ -128,18 +130,84 @@ func riskSection(d Drift) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n### リスク再評価(SkillSpector)\n\n")
+
+	if highRisk(d.NewRisk) {
+		fmt.Fprintf(&b, "%s %s\n\n",
+			bannerBadge("RISK", fmt.Sprintf("%s %d/100", strings.ToUpper(d.NewRisk.Severity), d.NewRisk.Score), sevColor(d.NewRisk.Severity)),
+			bannerBadge("RECOMMENDATION", d.NewRisk.Recommendation, recColor(d.NewRisk.Recommendation)))
+	}
+
 	b.WriteString("| 指標 | 現行(手元) | 上流の新版 |\n")
 	b.WriteString("|------|------------|------------|\n")
 	fmt.Fprintf(&b, "| スコア | %s | %d |\n", scoreCell(d.OldRisk), d.NewRisk.Score)
-	fmt.Fprintf(&b, "| 深刻度 | %s | %s |\n", sevCell(d.OldRisk), d.NewRisk.Severity)
-	fmt.Fprintf(&b, "| 推奨 | %s | %s |\n", recCell(d.OldRisk), d.NewRisk.Recommendation)
+	fmt.Fprintf(&b, "| 深刻度 | %s | %s |\n", sevCell(d.OldRisk), sevBadge(d.NewRisk.Severity))
+	fmt.Fprintf(&b, "| 推奨 | %s | %s |\n", recCell(d.OldRisk), recBadge(d.NewRisk.Recommendation))
 
 	if worsened(d.OldRisk, d.NewRisk) {
-		fmt.Fprintf(&b, "\n⚠️ 上流の新版はリスク評価が悪化している(スコア %d→%d、推奨 %s)。取り込みは特に慎重に確認すること。\n",
+		fmt.Fprintf(&b, "\n> [!CAUTION]\n> **上流の新版はリスク評価が悪化している(スコア %d → %d、推奨 %s)。**\n> 取り込みは特に慎重に確認すること。\n",
 			d.OldRisk.Score, d.NewRisk.Score, d.NewRisk.Recommendation)
 	}
 	return b.String()
 }
+
+// highRisk は専用のバナー枠を出すべき高リスク評価かを返す。
+func highRisk(r *Risk) bool {
+	return sevRank(r.Severity) >= sevRank("HIGH") || recRank(r.Recommendation) >= recRank("DO_NOT_INSTALL")
+}
+
+// ---- shields.io バッジ描画 ----
+// 画像が読めない環境でもalt文字列だけで内容が伝わるようにする。
+
+// badgeEscape は shields.io の静的バッジのパス断片向けエスケープ。
+// ("-" は区切り文字なので "--"、"_" は空白扱いなので "__" に逃がす)
+func badgeEscape(s string) string {
+	return url.PathEscape(strings.NewReplacer("-", "--", "_", "__", " ", "_").Replace(s))
+}
+
+// mdBadge は色付きの小バッジ1個分のMarkdown。表のセル用。
+func mdBadge(message, color string) string {
+	return fmt.Sprintf("![%s](https://img.shields.io/badge/%s-%s?style=flat-square)",
+		message, badgeEscape(message), color)
+}
+
+// bannerBadge は高リスク専用の幅広バッジ。ラベル付き・for-the-badgeスタイルで
+// 通常の表より一回り大きく描画される。
+func bannerBadge(label, message, color string) string {
+	return fmt.Sprintf("![%s: %s](https://img.shields.io/badge/%s-%s-%s?style=for-the-badge&labelColor=24292f)",
+		label, message, badgeEscape(label), badgeEscape(message), color)
+}
+
+// sevColor / recColor は shields.io の色名へのマッピング。
+func sevColor(s string) string {
+	switch strings.ToUpper(s) {
+	case "LOW":
+		return "success"
+	case "MEDIUM":
+		return "yellow"
+	case "HIGH":
+		return "orange"
+	case "CRITICAL":
+		return "critical"
+	default:
+		return "lightgrey"
+	}
+}
+
+func recColor(s string) string {
+	switch strings.ToUpper(s) {
+	case "SAFE":
+		return "success"
+	case "CAUTION":
+		return "yellow"
+	case "DO_NOT_INSTALL":
+		return "critical"
+	default:
+		return "lightgrey"
+	}
+}
+
+func sevBadge(s string) string { return mdBadge(s, sevColor(s)) }
+func recBadge(s string) string { return mdBadge(s, recColor(s)) }
 
 func scoreCell(r *Risk) string {
 	if r == nil {
@@ -152,14 +220,14 @@ func sevCell(r *Risk) string {
 	if r == nil {
 		return "—"
 	}
-	return r.Severity
+	return sevBadge(r.Severity)
 }
 
 func recCell(r *Risk) string {
 	if r == nil {
 		return "—"
 	}
-	return r.Recommendation
+	return recBadge(r.Recommendation)
 }
 
 // worsened は新版のリスクが旧版より悪化したかを返す。
